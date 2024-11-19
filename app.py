@@ -27,6 +27,8 @@ with open('tools.pkl', 'rb') as f:
     tools = pickle.load(f)
 
 from llama_index.agent.openai import OpenAIAgent
+from llama_index.core.base.llms.types import ChatMessage
+from llama_index.core.base.llms.types import MessageRole
 
 agent = OpenAIAgent.from_tools(tools, verbose=True)
 
@@ -43,6 +45,8 @@ def auth_callback(username: str, password: str):
 
 @cl.set_starters
 async def set_starters():
+    global agent
+    agent = OpenAIAgent.from_tools(tools, verbose=True)
     return [
         cl.Starter(
             label="Morning routine ideation",
@@ -78,6 +82,8 @@ def start_chat():
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
+    global agent
+    cl.user_session.set("memory", ConversationBufferMemory(return_messages=True))
     memory = ConversationBufferMemory(return_messages=True)
     root_messages = [m for m in thread["steps"] if m["parentId"] == None]
     for message in root_messages:
@@ -85,7 +91,17 @@ async def on_chat_resume(thread: ThreadDict):
             memory.chat_memory.add_user_message(message["output"])
         else:
             memory.chat_memory.add_ai_message(message["output"])
-
+    # context = """
+    # These are your history chat with the client. 
+    # You do not need to respond to this prompt but in the future, if the user ask questions, you can and should refer to the history chat to provide the best response.
+    # """
+    previous_messages = []
+    for m in thread["steps"]:
+        if (m["type"] == "user_message"):
+            previous_messages.append(ChatMessage(role=MessageRole.USER, content=m["output"]))
+        elif (m["type"] == "assistant_message"):
+            previous_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=m["output"]))
+    agent = OpenAIAgent.from_tools(tools=tools, chat_history=previous_messages, verbose=True)
     cl.user_session.set("memory", memory)
 
 
@@ -113,7 +129,7 @@ async def run_conversation(message: cl.Message):
     res = cl.Message(content=answer, author="Answer")
 
     await res.send()
-
+    print(memory.chat_memory)
     memory.chat_memory.add_user_message(message.content)
     memory.chat_memory.add_ai_message(res.content)
 
